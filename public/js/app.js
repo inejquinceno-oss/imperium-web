@@ -9,8 +9,8 @@ const DOWL = ["domingo","lunes","martes","miércoles","jueves","viernes","sábad
 const MON = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
 const MONL = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const PEOPLE = ["MJ", "JQ"];
-const TASK = Object.fromEntries(TASKS.map(t => [t.id, t]));
-const PHASE = Object.fromEntries(PHASES.map(p => [p.id, p]));
+// Contenido del plan: llega desde Supabase después del login (loadCatalog), no está en archivos públicos.
+let TASKS = [], PHASES = [], L = {}, TASK = {}, PHASE = {};
 
 function todayISO() {
   const d = new Date();
@@ -74,6 +74,34 @@ function markSynced() {
   for (const id of Object.keys(state.tasks)) synced.tasks[id] = JSON.stringify(taskRow(id, state.tasks[id]));
   synced.config = JSON.stringify(configRow());
   synced.names = { MJ: cleanName("MJ"), JQ: cleanName("JQ") };
+}
+// Valida cada fila: ids y códigos se insertan en atributos HTML, así que solo se aceptan formatos conocidos.
+const RE_TASK = /^T[0-9A-Za-z]{1,8}$/, RE_PHASE = /^f[0-9]{1,2}$/, RE_KEY = /^[A-Za-z0-9]{1,40}$/;
+async function loadCatalog() {
+  const [fa, ta, de, fu, tf] = await Promise.all([
+    sb.from("fases").select("id,numero,nombre,criterio_salida,orden").order("orden"),
+    sb.from("tareas").select("id,fase_id,responsable,horas,es_hito,titulo,porque,pasos,entregable,criterio_hecho,orden").order("orden"),
+    sb.from("tarea_dependencias").select("tarea_id,depende_de"),
+    sb.from("fuentes").select("clave,titulo,url"),
+    sb.from("tarea_fuentes").select("tarea_id,fuente_clave,orden").order("orden")
+  ]);
+  for (const r of [fa, ta, de, fu, tf]) if (r.error) throw r.error;
+  PHASES = fa.data.filter(p => RE_PHASE.test(p.id))
+    .map(p => ({ id: p.id, n: String(p.numero).replace(/[^\p{L}\p{N} ]/gu, "").slice(0, 20), name: String(p.nombre), gate: String(p.criterio_salida) }));
+  PHASE = Object.fromEntries(PHASES.map(p => [p.id, p]));
+  L = {};
+  for (const f of fu.data) if (RE_KEY.test(f.clave) && /^https:\/\//.test(f.url)) L[f.clave] = [String(f.titulo), String(f.url)];
+  TASKS = ta.data
+    .filter(t => RE_TASK.test(t.id) && PHASE[t.fase_id] && ["MJ", "JQ", "AMBAS"].includes(t.responsable) && Number(t.horas) > 0)
+    .map(t => ({
+      id: t.id, f: t.fase_id, o: t.responsable, h: Number(t.horas), gate: !!t.es_hito,
+      t: String(t.titulo), why: String(t.porque), steps: (t.pasos || []).map(String),
+      out: String(t.entregable), done: String(t.criterio_hecho), deps: [], res: []
+    }));
+  TASK = Object.fromEntries(TASKS.map(t => [t.id, t]));
+  for (const d of de.data) if (TASK[d.tarea_id] && TASK[d.depende_de]) TASK[d.tarea_id].deps.push(d.depende_de);
+  for (const r of tf.data) if (TASK[r.tarea_id] && L[r.fuente_clave]) TASK[r.tarea_id].res.push(r.fuente_clave);
+  if (!TASKS.length) throw new Error("catálogo vacío");
 }
 async function loadRemote() {
   const [cfg, per, prog] = await Promise.all([
@@ -522,7 +550,7 @@ function renderDrawer() {
   const after = TASKS.filter(x => (x.deps || []).includes(t.id)).map(x => '<button data-open="' + x.id + '"><span class="dot ' + x.o + '"></span>' + x.id + "</button>").join("");
   const prevBody = root.querySelector(".dr-b"); const prevScroll = prevBody ? prevBody.scrollTop : 0;
   const anim = ui.justOpened ? " anim" : ""; ui.justOpened = false;
-  const res = t.res.map(k => L[k] ? '<li><a href="' + L[k][1] + '" target="_blank" rel="noopener noreferrer">' + esc(L[k][0]) + "</a></li>" : "").join("");
+  const res = t.res.map(k => L[k] ? '<li><a href="' + esc(L[k][1]) + '" target="_blank" rel="noopener noreferrer">' + esc(L[k][0]) + "</a></li>" : "").join("");
   root.innerHTML = '<div class="scrim" data-act="close"></div><aside class="drawer' + anim + '" role="dialog" aria-modal="true" aria-labelledby="drTitle">' +
     '<div class="dr-h"><div class="dr-top"><span class="tid">' + t.id + '</span><span class="chip">' + PHASE[t.f].n + " · " + esc(PHASE[t.f].name) + "</span>" + ownerChip(t.o) + badges(t.id) +
     '<button class="btn iconbtn ghost x" data-act="close" aria-label="Cerrar">✕</button></div><h2 id="drTitle">' + esc(t.t) + "</h2>" +
@@ -655,7 +683,7 @@ document.getElementById("themeBtn").addEventListener("click", () => {
 window.ImperiumAuth.onReady(async ({ client, user }) => {
   sb = client; me = user.id;
   setSaved("Cargando…");
-  try { await loadRemote(); }
+  try { await loadCatalog(); await loadRemote(); }
   catch (e) {
     // Sin datos del servidor no se muestra el plan: editar sobre valores por defecto pisaría el progreso real.
     sb = null;

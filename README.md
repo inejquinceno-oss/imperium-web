@@ -12,10 +12,11 @@ Solo la carpeta `public/` se publica. Lo demás (SQL, scripts, versión vieja) n
 | `public/css/` | Estilos de la app y del login |
 | `public/js/config.js` | URL y clave publishable de Supabase |
 | `public/js/auth.js` | Login, verificación en dos pasos, recuperación, cierre por inactividad |
-| `public/js/data.js` · `scheduler.js` · `app.js` | Contenido del plan, cálculo del cronograma e interfaz |
+| `public/js/scheduler.js` · `app.js` | Cálculo del cronograma e interfaz (el contenido del plan se lee de Supabase tras el login) |
+| `scripts/plan-data.js` | Fuente del contenido del plan; no se publica. Tras editarlo: `node scripts/generar-seed.js` y ejecutar `02_seed.sql` |
 | `public/js/vendor/` | `@supabase/supabase-js` 2.117.2 servido localmente (sin CDN) con hash SRI |
 | `supabase/` | SQL: esquema y seguridad, datos iniciales, lista de miembros |
-| `scripts/generar-seed.js` | Regenera `supabase/02_seed.sql` desde `public/js/data.js` |
+| `scripts/generar-seed.js` | Regenera `supabase/02_seed.sql` desde `scripts/plan-data.js` |
 
 ## Puesta en marcha
 
